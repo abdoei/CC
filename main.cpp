@@ -1,77 +1,103 @@
-#include <codecvt>
-#include <fstream>
-#include <iosfwd>
 #include <iostream>
 #include <locale>
-#include <regex>
-#include <string>
-#include <sys/stat.h>
 #include <unistd.h>
 
-long GetFileSize(std::string filename) {
-  struct stat stat_buf;
-  int rc = stat(filename.c_str(), &stat_buf);
-  return rc == 0 ? stat_buf.st_size : -1;
-}
+int main(int argc, char *argv[]) {
+  char *file_name = nullptr;
+  struct {
+    bool c = false;
+    bool l = false;
+    bool w = false;
+    bool m = false;
+  } __attribute__((aligned(4))) flags;
+  struct {
+    unsigned c = 0;
+    unsigned l = 0;
+    unsigned w = 0;
+    unsigned m = 0;
+  } __attribute__((aligned(16))) counter;
 
-int main(int argc, char **argv) {
-  bool done = false;
-  for (int i = 0; i < argc; ++i) {
-    if (argv[i] == std::string("-c")) {
-      std::string file_name = argv[i + 1];
-      int word_count = 0;
-      auto file_handler = std::ifstream(file_name);
-      word_count = GetFileSize(file_name);
-      std::cout << "\t" << word_count << " " << file_name << '\n';
-      done = true;
-    } else if (argv[i] == std::string("-l")) {
-      std::string line;
-      std::string file_name = argv[i + 1];
-      int line_count = 0;
-      auto file_handler = std::ifstream(file_name);
-      while (getline(file_handler, line))
-        line_count++;
-      std::cout << "\t" << line_count << " " << file_name << '\n';
-      done = true;
-    } else if (argv[i] == std::string("-w")) {
-      std::string file_name = argv[i + 1];
-      std::string line;
-      int word_count = 0;
-      auto file_handler = std::ifstream(file_name);
-      while (getline(file_handler, line)) {
-        // std::regex
-        // word_regex("([\\wàêœ§ŭ’éŭÉÈÊËÇÀÂÔÙÛÎÏÄÖÜŒœÆéèêëçàâôùûîïäöüæ]+([-'./\\ŭ’,ÉÈÊËÇÀÂÔÙÛÎÏÄÖÜŒœÆéèêëçàâôùûîïäöüæ—:]*\\w*)*)");
-        std::regex word_regex("\\S+");
-        auto words_begin =
-            std::sregex_iterator(line.begin(), line.end(), word_regex);
-        auto words_end = std::sregex_iterator();
-        word_count += std::distance(words_begin, words_end);
-      }
-      std::cout << "\t" << word_count << " " << file_name << '\n';
-      done = true;
-    } else if (argv[i] == std::string("-m")) {
-      std::string file_name = argv[i + 1];
-      FILE *fd = fopen("/home/abdoe/dev/cc/wc/test.txt", "r");
-      // std::cout << file_name.c_str() << std::endl;
-      std::ifstream file_handler(file_name);
-      if (!file_handler) {
-        std::cerr << "Error: Could not open file " << file_name << std::endl;
-        return 1;
-      }
-      std::string line;
-      int char_count = 0;
-
-      setlocale(LC_CTYPE, "");
-      wint_t wc;
-      while (WEOF != (fgetwc(fd))) {
-        char_count++;
-      }
-
-      std::cout << "\t" << char_count << " " << file_name << '\n';
-      done = true;
+  int opt = -1;
+  while ((opt = getopt(argc, argv, "clwm")) != -1) {
+    switch (opt) {
+    case 'c':
+      flags.c = true;
+      break;
+    case 'l':
+      flags.l = true;
+      break;
+    case 'w':
+      flags.w = true;
+      break;
+    case 'm':
+      flags.m = true;
+      break;
+    case '?':
+      std::cout << "Unknown flag: " << optopt << std::endl;
+      return EXIT_FAILURE;
+    default:
+      return EXIT_FAILURE;
     }
   }
-  if (not done)
-    std::cout << "Something went wrong!" << '\n';
-  return 0;
+  for (; optind < argc; ++optind) {
+    if (file_name != nullptr) {
+      std::cout << "Too many arguments: You have to give just one file name."
+                << std::endl;
+      return EXIT_FAILURE;
+    }
+    file_name = argv[optind];
+  }
+
+  FILE *fd = nullptr;
+  if (file_name == nullptr) {
+    fd = stdin;
+  } else {
+    fd = fopen(file_name, "r");
+  }
+
+  if (fd == nullptr) {
+    std::cout << "Error opening file." << std::endl;
+    return EXIT_FAILURE;
+  }
+
+  setlocale(LC_CTYPE, "");
+  wint_t wc;
+  bool in_word = false;
+  char buf[8];
+  while (WEOF != (wc = fgetwc(fd))) {
+    counter.m++;
+    counter.c += wctomb(buf, wc); // TODO: buffer some characters
+    counter.l += wc == L'\n';
+
+    bool wc_is_space = iswspace(wc)!=0;
+    if (in_word) {
+      if (wc_is_space) {
+        in_word = false;
+      }
+    } else if (not wc_is_space) {
+      in_word = true, counter.w++;
+    }
+  }
+
+  fclose(fd);
+  if (not(flags.l or flags.w or flags.c or flags.m)) {
+    flags.w = flags.l = flags.c = true;
+  }
+  if (flags.l) {
+    std::cout << "  " << counter.l;
+  }
+  if (flags.w) {
+    std::cout << "  " << counter.w;
+  }
+  if (flags.c) {
+    std::cout << "  " << counter.c;
+  }
+  if (flags.m) {
+    std::cout << "  " << counter.m;
+  }
+  if (file_name) {
+    std::cout << "  " << file_name;
+  }
+  std::cout << std::endl;
+  return EXIT_SUCCESS;
 }
