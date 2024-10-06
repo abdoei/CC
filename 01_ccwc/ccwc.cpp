@@ -1,3 +1,6 @@
+#include <cwchar>
+#include <cwctype>
+#include <fcntl.h>
 #include <iostream>
 #include <locale>
 #include <unistd.h>
@@ -48,38 +51,69 @@ int main(int argc, char *argv[]) {
     file_name = argv[optind];
   }
 
-  FILE *fd = nullptr;
+  int fd = -1;
   if (file_name == nullptr) {
-    fd = stdin;
+    fd = STDIN_FILENO; // stdin;
   } else {
-    fd = fopen(file_name, "r");
+    fd = open(file_name, O_RDONLY);
   }
 
-  if (fd == nullptr) {
+  if (fd == -1) {
     std::cout << "Error opening file." << std::endl;
     return EXIT_FAILURE;
   }
 
-  setlocale(LC_CTYPE, "");
-  wint_t wc;
+  std::setlocale(LC_ALL, "en_US.utf8");
+  const int _1K = 1 * 1024;
+  char buffer[_1K] = {0};
+  ssize_t bytes_read = 0;
   bool in_word = false;
-  char buf[8];
-  while (WEOF != (wc = fgetwc(fd))) {
-    counter.m++;
-    counter.c += wctomb(buf, wc); // TODO: buffer some characters
-    counter.l += wc == L'\n';
+  std::mbstate_t state = std::mbstate_t();           // initial state
+  while ((bytes_read = read(fd, buffer, _1K)) > 0) { // buffer it 1KB by 1KB
+    const char *buffer_pointer = buffer;
+    int len = 0;
+    wchar_t wc = L'0';
+    counter.c += bytes_read;
 
-    bool wc_is_space = iswspace(wc)!=0;
-    if (in_word) {
-      if (wc_is_space) {
-        in_word = false;
+    while ((len = std::mbrtowc(&wc, buffer_pointer, bytes_read, &state)) > 0) {
+      // printf("check point inner\n");
+      // if(1){
+      counter.m++;
+      counter.l += (wc == L'\n');
+
+      bool wc_is_space = (wc == L' ');  //(iswspace(wc) != 0);
+      if (in_word) {
+        if (wc_is_space) {
+          in_word = false;
+        }
+      } else if (not wc_is_space) {
+        in_word = true, counter.w++;
       }
-    } else if (not wc_is_space) {
-      in_word = true, counter.w++;
+      // }
+      buffer_pointer += len;  // static_cast<int>(len);
+      // printf("Pointer: %p\t%d\n", buffer_pointer, len);
     }
   }
+  /*
+    wint_t wc;
 
-  fclose(fd);
+    char buf[8];
+    while (WEOF != (wc = fgetwc(fd))) {
+      counter.m++;
+      counter.c += wctomb(buf, wc); // TODO: buffer some characters
+      counter.l += wc == L'\n';
+
+      bool wc_is_space = iswspace(wc)!=0;
+      if (in_word) {
+        if (wc_is_space) {
+          in_word = false;
+        }
+      } else if (not wc_is_space) {
+        in_word = true, counter.w++;
+      }
+    }
+  */
+  close(fd);
   if (not(flags.l or flags.w or flags.c or flags.m)) {
     flags.w = flags.l = flags.c = true;
   }
@@ -90,13 +124,13 @@ int main(int argc, char *argv[]) {
     std::cout << "  " << counter.w;
   }
   if (flags.c) {
-    std::cout << "  " << counter.c;
+    std::cout << " " << counter.c;
   }
   if (flags.m) {
     std::cout << "  " << counter.m;
   }
   if (file_name) {
-    std::cout << "  " << file_name;
+    std::cout << " " << file_name;
   }
   std::cout << std::endl;
   return EXIT_SUCCESS;
