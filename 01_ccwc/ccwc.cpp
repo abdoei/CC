@@ -1,5 +1,3 @@
-#include <cwchar>
-#include <cwctype>
 #include <fcntl.h>
 #include <iostream>
 #include <locale>
@@ -62,57 +60,51 @@ int main(int argc, char *argv[]) {
     std::cout << "Error opening file." << std::endl;
     return EXIT_FAILURE;
   }
-
   std::setlocale(LC_ALL, "en_US.utf8");
-  const int _1K = 1 * 1024;
+  const int _1K = 4 * 1024;
   char buffer[_1K] = {0};
   ssize_t bytes_read = 0;
   bool in_word = false;
-  std::mbstate_t state = std::mbstate_t();           // initial state
-  while ((bytes_read = read(fd, buffer, _1K)) > 0) { // buffer it 1KB by 1KB
+  std::mbstate_t state = std::mbstate_t();
+
+  while ((bytes_read = read(fd, buffer, _1K)) > 0) { // Read 1KB chunks
     const char *buffer_pointer = buffer;
     int len = 0;
     wchar_t wc = L'0';
     counter.c += bytes_read;
 
-    while ((len = std::mbrtowc(&wc, buffer_pointer, bytes_read, &state)) > 0) {
-      // printf("check point inner\n");
-      // if(1){
-      counter.m++;
-      counter.l += (wc == L'\n');
+    while (bytes_read > 0) {
+      len = std::mbrtowc(&wc, buffer_pointer, bytes_read, &state);
 
-      bool wc_is_space = (wc == L' ');  //(iswspace(wc) != 0);
-      if (in_word) {
-        if (wc_is_space) {
-          in_word = false;
+      if (len > 0) { // Valid multibytes
+        counter.m++;
+        counter.l += (wc == L'\n'); 
+
+        const bool wc_is_space = (bool)iswspace(wc);
+        if (in_word) {
+          if (wc_is_space) {
+            in_word = false; // End of a word
+          }
+        } else if (!wc_is_space) {
+          in_word = true;
+          counter.w++; // Start of a new word
         }
-      } else if (not wc_is_space) {
-        in_word = true, counter.w++;
+
+        // Move buffer pointer forward by the number of bytes consumed
+        buffer_pointer += len;
+        bytes_read -= len;
+      } else if (len == -2) {
+        // Incomplete multibyte character. Break to get the next chunk of input.
+        break;
+      } else if (len == -1) {
+        // Invalid multibyte sequence, skip one byte and continue
+        ++buffer_pointer;
+        --bytes_read;
+        state = std::mbstate_t(); // Reset state
       }
-      // }
-      buffer_pointer += len;  // static_cast<int>(len);
-      // printf("Pointer: %p\t%d\n", buffer_pointer, len);
     }
   }
-  /*
-    wint_t wc;
 
-    char buf[8];
-    while (WEOF != (wc = fgetwc(fd))) {
-      counter.m++;
-      counter.c += wctomb(buf, wc); // TODO: buffer some characters
-      counter.l += wc == L'\n';
-
-      bool wc_is_space = iswspace(wc)!=0;
-      if (in_word) {
-        if (wc_is_space) {
-          in_word = false;
-        }
-      } else if (not wc_is_space) {
-        in_word = true, counter.w++;
-      }
-    }
-  */
   close(fd);
   if (not(flags.l or flags.w or flags.c or flags.m)) {
     flags.w = flags.l = flags.c = true;
@@ -123,15 +115,18 @@ int main(int argc, char *argv[]) {
   if (flags.w) {
     std::cout << "  " << counter.w;
   }
-  if (flags.c) {
-    std::cout << " " << counter.c;
-  }
   if (flags.m) {
     std::cout << "  " << counter.m;
   }
+  if (flags.c) {
+    std::cout << "  " << counter.c;
+  }
   if (file_name) {
-    std::cout << " " << file_name;
+    std::cout << "  " << file_name;
   }
   std::cout << std::endl;
+
   return EXIT_SUCCESS;
 }
+
+// void print_counters()
